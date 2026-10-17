@@ -137,7 +137,7 @@ Halaman login admin: `http://localhost/winsbeads/admin/login-admin.php`
 
 Kredensial tersebut digunakan untuk pengujian lokal. Ganti kata sandi admin bawaan sebelum menggunakan aplikasi di luar lingkungan demo lokal.
 
-**Pengujian pembayaran:** Gunakan Midtrans Sandbox untuk menguji transaksi. Pengujian notifikasi pembayaran dari Midtrans ke localhost mungkin memerlukan *public tunnel*, seperti [ngrok](https://ngrok.com/). Lihat [PANDUAN-MIDTRANS.md](PANDUAN-MIDTRANS.md) untuk petunjuk lebih lanjut.
+**Pengujian Pembayaran:** Integrasi pembayaran diuji menggunakan Midtrans Sandbox. Pengujian notifikasi pembayaran pada lingkungan lokal dapat memerlukan *public tunnel*, seperti [ngrok](https://ngrok.com/). Untuk penjelasan mengenai alur pembayaran, verifikasi transaksi, dan pertimbangan keamanan, lihat [PANDUAN-MIDTRANS.md](PANDUAN-MIDTRANS.md).
 
 ## Struktur Proyek
 
