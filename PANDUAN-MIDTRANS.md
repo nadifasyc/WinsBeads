@@ -1,108 +1,83 @@
-# Panduan Integrasi Midtrans (Snap) untuk Winsbeads
 
-## 1. Cara kerjanya (bayangkan dulu alurnya)
+# Dokumentasi Integrasi Pembayaran Midtrans
 
-```
-Pelanggan klik "Selesaikan Pesanan"
-   │
-   ▼
-checkout-proses.php  (SERVER)
-   1. simpan pesanan, status_bayar = pending
-   2. minta "Snap token" ke Midtrans (pakai SERVER KEY, rahasia)
-   3. redirect ke bayar.php
-   │
-   ▼
-bayar.php  (BROWSER)
-   snap.js membuka popup pembayaran memakai Snap token (pakai CLIENT KEY, boleh publik)
-   │
-   ▼  pelanggan bayar (QRIS, VA bank, e-wallet, kartu, dst.)
-   │
-Midtrans ──POST──▶ midtrans-notif.php  (SERVER, webhook)
-   memverifikasi signature, lalu ubah status_bayar → paid / failed / expired
-```
+## Overview
 
-Kenapa ada webhook? Karena browser pelanggan bisa saja tertutup atau dimanipulasi.
-**Status bayar yang dipercaya hanya yang datang dari webhook**, bukan dari callback `onSuccess` di JavaScript.
+Wins Beads mengintegrasikan **Midtrans Snap API** untuk menangani pembayaran online. Integrasi ini memungkinkan pelanggan menyelesaikan pembayaran melalui metode yang tersedia di Midtrans, seperti QRIS, virtual account, dan e-wallet.
 
-Dua kunci, dua fungsi:
-| Kunci | Dipakai di | Boleh tampil di browser? |
-|---|---|---|
-| Server Key | PHP (membuat token, cek signature) | TIDAK, rahasia |
-| Client Key | `snap.js` | Ya |
+Integrasi ini dikembangkan dengan PHP Native dan mencakup pembuatan token pembayaran, pemrosesan notifikasi transaksi, verifikasi pembayaran, serta sinkronisasi status pesanan.
 
-## 2. Langkah persiapan (sekali saja)
+## Payment Flow
 
-1. Daftar di https://dashboard.sandbox.midtrans.com (akun **Sandbox**, gratis, uang tidak sungguhan).
-2. Buka **Settings → Access Keys**, salin Server Key dan Client Key (awalan `SB-Mid-...`).
-3. Salin `config/midtrans.local.example.php` menjadi `config/midtrans.local.php`, lalu isi kedua kunci.
-   File ini sudah ada di `.gitignore`. **Jangan pernah meng-commit kunci ke GitHub.**
-   Kalau pernah ter-commit, anggap bocor dan generate ulang kuncinya.
-4. Buka phpMyAdmin → database `winsbeads` → tab SQL → jalankan isi `migrasi-midtrans.sql`.
-5. Pastikan PHP punya ekstensi cURL (XAMPP: buka `php.ini`, hapus `;` di depan `extension=curl`, restart Apache).
+Alur pembayaran pada Wins Beads dirancang untuk memisahkan proses pembayaran di sisi pelanggan dari proses verifikasi transaksi di sisi server.
 
-## 3. Mengetes alur bayar di localhost
+1. **Checkout:** Sistem menyimpan pesanan dan membuat permintaan token pembayaran ke Midtrans menggunakan Server Key.
+2. **Payment:** Pelanggan menyelesaikan pembayaran melalui antarmuka Midtrans Snap.
+3. **Notification:** Midtrans mengirimkan notifikasi transaksi ke endpoint webhook pada server.
+4. **Verification:** Server memverifikasi signature notifikasi dan memeriksa nominal transaksi sebelum memperbarui status pembayaran.
+5. **Order Update:** Status pembayaran dan pesanan diperbarui berdasarkan hasil verifikasi transaksi.
 
-1. Login sebagai user, tambah produk ke keranjang, checkout.
-2. Popup Midtrans muncul. Pilih metode, pakai data uji dari
-   https://docs.midtrans.com/docs/testing-payment-on-sandbox (kartu uji `4811 1111 1111 1114`, CVV `123`, OTP `112233`).
-3. Setelah bayar kamu diarahkan ke `checkout-berhasil.php`.
+Webhook digunakan sebagai mekanisme utama untuk menerima pembaruan status pembayaran. Callback pada browser tidak dijadikan satu-satunya dasar untuk menentukan keberhasilan transaksi karena hasil yang diterima browser tidak cukup untuk memverifikasi pembayaran secara independen.
 
-Di tahap ini status di database mungkin masih `pending`, karena webhook belum bisa masuk ke localhost. Lanjut langkah 4.
+## Technical Implementation
 
-## 4. Membuat webhook bisa diterima di localhost
+### 1. Snap Token Generation
 
-Midtrans harus bisa menghubungi servermu lewat internet, jadi localhost tidak terjangkau. Pakai tunnel:
+Server membuat token pembayaran melalui Snap API menggunakan Server Key sebagai kredensial autentikasi.
 
-1. Pasang ngrok (https://ngrok.com), lalu jalankan: `ngrok http 80`
-2. Salin URL `https://xxxx.ngrok-free.app`.
-3. Di dashboard Midtrans: **Settings → Configuration → Payment Notification URL**, isi
-   `https://xxxx.ngrok-free.app/winsbeads/midtrans-notif.php` (sesuaikan nama folder), klik **Update**.
-4. Ulangi tes bayar. Cek halaman admin → Pesanan, kolom **Pembayaran** harus berubah jadi **Lunas**.
-5. Kalau gagal, lihat log di dashboard ngrok (http://127.0.0.1:4040) untuk melihat request dari Midtrans dan jawabanmu.
+Informasi transaksi dikirim ke Midtrans untuk menghasilkan token yang digunakan oleh Snap.js pada halaman pembayaran.
 
-URL ngrok gratis berubah tiap dijalankan, jadi perbarui di dashboard setiap kali.
+Implementasi ini memisahkan kredensial server dari antarmuka pelanggan agar Server Key tidak terekspos di browser.
 
-## 5. Penjelasan file
+### 2. Payment Notification & Verification
 
-| File | Peran |
-|---|---|
-| `config/midtrans.php` | Fungsi bantu: buat token (cURL), verifikasi signature, petakan status |
-| `config/midtrans.local.php` | Kunci rahasia (tidak ikut Git) |
-| `checkout-proses.php` | Simpan pesanan → minta token → redirect |
-| `bayar.php` | Halaman popup Snap, bisa dibuka ulang kalau popup tertutup |
-| `midtrans-notif.php` | Webhook: verifikasi lalu update status |
-| `checkout-berhasil.php` | Menampilkan hasil sesuai status di database |
-| `migrasi-midtrans.sql` | Kolom baru di tabel `pesanan` |
+Endpoint webhook menerima notifikasi transaksi dari Midtrans dan memverifikasi keaslian notifikasi sebelum memperbarui data pesanan.
 
-Pelajari tiga bagian ini untuk memahami intinya:
-- `midtrans_create_snap_token()`: request ke Midtrans dengan Basic Auth `base64(ServerKey + ":")`.
-- `midtrans_signature_valid()`: `SHA512(order_id + status_code + gross_amount + ServerKey)` dibandingkan dengan `signature_key` dari Midtrans.
-- `midtrans_map_status()`: arti `settlement`, `capture`, `pending`, `expire`, `deny`, `cancel`.
+Proses verifikasi mencakup:
 
-## 6. Aturan penting
+- Validasi signature notifikasi menggunakan mekanisme verifikasi Midtrans.
+- Pemeriksaan nominal transaksi terhadap total pesanan yang tersimpan di database.
+- Pemetaan status transaksi Midtrans ke status pembayaran aplikasi.
+- Pembaruan status pesanan berdasarkan hasil verifikasi yang valid.
 
-- `gross_amount` harus **integer** dan sama dengan jumlah `price × quantity` semua item.
-- `order_id` harus unik, maksimal 50 karakter, dan tidak boleh dipakai ulang.
-- Webhook harus membalas HTTP **200**, kalau tidak Midtrans akan mengirim ulang.
-- Webhook harus **idempoten**: pesanan yang sudah `paid` tidak diturunkan lagi.
-- Selalu cek nominal di webhook sama dengan nominal pesananmu.
+Sistem juga mempertimbangkan notifikasi berulang agar pemrosesan transaksi tidak menyebabkan perubahan status yang tidak semestinya.
 
-## 7. Pindah ke Production (nanti)
+### 3. Payment Status Synchronization
 
-Daftarkan bisnis di dashboard production dan tunggu verifikasi Midtrans. Lalu ganti kunci menjadi kunci production dan `'is_production' => true`. Pasang situs di hosting ber-HTTPS, dan isi Payment Notification URL di dashboard **production** (terpisah dari sandbox).
+Selain notifikasi webhook, Wins Beads menyediakan mekanisme sinkronisasi menggunakan Midtrans Status API.
 
+Mekanisme ini digunakan sebagai cadangan ketika status transaksi di database belum diperbarui, misalnya karena webhook tidak dapat diterima saat aplikasi berjalan di localhost.
 
-## Tambahan: halaman tujuan setelah bayar & cadangan webhook
+Server mengambil status transaksi langsung dari Midtrans, memverifikasi informasi transaksi, lalu menyinkronkannya dengan data pesanan.
 
-**1. Kenapa setelah bayar muncul `example.com`?**
-Itu *Finish Redirect URL* bawaan dashboard Sandbox. Sekarang `checkout-proses.php` mengirim `callbacks.finish`
-ke `checkout-berhasil.php` untuk tiap transaksi, jadi pembeli kembali ke tokomu. Midtrans menambahkan `?order_id=...`
-di akhir alamat itu.
+Status pembayaran yang dikirim melalui parameter URL browser tidak digunakan sebagai sumber kebenaran transaksi.
 
-**2. Kenapa status bisa tetap "menunggu" padahal sudah dibayar?**
-Status hanya berubah saat webhook sampai. Di localhost webhook butuh ngrok yang hidup, dan alamat ngrok versi gratis
-berubah setiap dinyalakan ulang (harus diperbarui di dashboard). Sebagai cadangan, saat pelanggan membuka
-`checkout-berhasil.php`, `pesanan-detail.php`, atau `pesanan-saya.php`, server memanggil **Status API**
-(`GET /v2/{order_id}/status`, fungsi `midtrans_sinkron_pesanan()`), memeriksa signature dan nominalnya, lalu memperbarui status.
-Parameter `transaction_status` di URL **tidak dipercaya**; hanya jawaban resmi dari Midtrans yang dipakai.
-Di server produksi, webhook tetap menjadi sumber utama.
+## Security Considerations
+
+Beberapa aspek keamanan yang diterapkan dalam integrasi pembayaran ini meliputi:
+
+- **Credential Protection:** Server Key disimpan dalam konfigurasi lokal dan tidak disertakan dalam repository.
+- **Signature Verification:** Notifikasi pembayaran diverifikasi sebelum diproses.
+- **Amount Validation:** Nominal transaksi diperiksa terhadap total pesanan di database.
+- **Server-Side Verification:** Status pembayaran ditentukan berdasarkan informasi transaksi yang diverifikasi oleh server, bukan hanya berdasarkan callback browser.
+- **Transaction Consistency:** Pemrosesan notifikasi mempertimbangkan pengiriman ulang dan perubahan status transaksi agar data pesanan tetap konsisten.
+
+## Local Testing
+
+Pengujian integrasi dilakukan menggunakan lingkungan **Midtrans Sandbox** agar alur pembayaran dapat diuji tanpa menggunakan transaksi uang sungguhan.
+
+Untuk pengujian webhook pada localhost, diperlukan endpoint yang dapat diakses dari internet. Salah satu opsi yang dapat digunakan adalah [ngrok](https://ngrok.com/).
+
+Endpoint notifikasi perlu dikonfigurasikan pada dashboard Midtrans Sandbox sesuai dengan alamat lokal yang diekspos melalui tunnel.
+
+Kredensial Sandbox dan konfigurasi pengujian disimpan secara lokal dan tidak disertakan dalam repository.
+
+## Production Considerations
+
+Sebelum digunakan pada lingkungan produksi, integrasi pembayaran perlu dikonfigurasikan menggunakan kredensial Production Midtrans, endpoint webhook ber-HTTPS, serta konfigurasi transaksi yang sesuai dengan lingkungan produksi.
+
+Pengujian tambahan juga diperlukan untuk memastikan penanganan notifikasi berulang, perubahan status transaksi, kegagalan pembayaran, dan sinkronisasi status pesanan berjalan dengan benar.
+
+---
+
+Dokumentasi ini menjelaskan pendekatan teknis integrasi pembayaran Midtrans pada proyek portofolio Wins Beads.
